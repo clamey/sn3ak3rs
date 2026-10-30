@@ -2,6 +2,7 @@ import { W, H, PAL, SPR, text, centerText } from './gfx.js';
 import { sfx, unlock, toggleMute } from './audio.js';
 import { WAVES, TOP, GROUND } from './waves.js';
 import { CUTSCENES, drawCutsceneFrame } from './cutscenes.js';
+import { fetchScores, submitScore, qualifies, isShared } from './scores.js';
 
 const canvas = document.getElementById('screen');
 const ctx = canvas.getContext('2d');
@@ -25,6 +26,10 @@ function press(k) {
 function release(k) { held.delete(k); }
 
 addEventListener('keydown', (e) => {
+  if (g.state === 'initials' && typeInitial(e.code)) {
+    e.preventDefault();
+    return;
+  }
   const k = KEYMAP[e.code];
   if (!k) return;
   e.preventDefault();
@@ -47,15 +52,6 @@ canvas.addEventListener('pointerup', () => release('start'));
 
 const justPressed = (k) => pressed.has(k);
 
-// ---- persistence ----------------------------------------------------------
-
-function loadHi() {
-  try { return Number(localStorage.getItem('spacebugs.hi')) || 0; } catch { return 0; }
-}
-function saveHi(v) {
-  try { localStorage.setItem('spacebugs.hi', String(v)); } catch { /* storage unavailable */ }
-}
-
 // ---- game state -----------------------------------------------------------
 
 const PLAYER_Y = GROUND - 7;
@@ -68,9 +64,10 @@ const stars = Array.from({ length: 40 }, () => ({
 
 const g = {
   state: 'title', timer: 0, paused: false, t: 0,
-  score: 0, hi: loadHi(), lives: 3, nextLife: EXTRA_LIFE_EVERY,
+  score: 0, hi: 0, lives: 3, nextLife: EXTRA_LIFE_EVERY,
   waveNum: 0, def: null, spd: 1, spawned: 0, killed: 0, spawnTimer: 0, elapsed: 0, bonusShown: 0,
   bugs: [], bullets: [], spits: [], parts: [],
+  table: [], tableStatus: 'loading', entry: null, highlight: null, saveError: false,
   player: { x: 136, y: PLAYER_Y, alive: true, dead: 0, inv: 0, cool: 0 },
   sfx,
   spit(x, y, vx, vy) {
@@ -260,8 +257,92 @@ function updatePlay() {
 function gameOver() {
   g.state = 'over';
   g.timer = 240;
-  saveHi(g.hi);
   sfx.gameOver();
+}
+
+// ---- high scores ----------------------------------------------------------
+
+const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+function refreshScores() {
+  fetchScores()
+    .then((rows) => {
+      g.table = rows;
+      g.tableStatus = 'ok';
+      g.hi = Math.max(g.hi, rows[0]?.score || 0);
+    })
+    .catch(() => { g.tableStatus = 'offline'; });
+}
+
+function toTitle() {
+  g.state = 'title';
+  g.timer = 0;
+}
+
+function afterGameOver() {
+  if (qualifies(g.table, g.score)) {
+    g.state = 'initials';
+    g.timer = 0;
+    g.entry = { letters: ['A', 'A', 'A'], pos: 0, saving: false };
+    sfx.extraLife();
+  } else {
+    toTitle();
+  }
+}
+
+// Keyboard letters go straight into the current slot; arrows + fire work for touch.
+function typeInitial(code) {
+  const en = g.entry;
+  if (!en || en.saving || g.timer < 30) return false;
+  if (/^Key[A-Z]$/.test(code)) {
+    en.letters[en.pos] = code[3];
+    if (en.pos < 2) en.pos++;
+    sfx.note(880, 0.04);
+    return true;
+  }
+  if (code === 'Backspace') {
+    en.pos = Math.max(0, en.pos - 1);
+    return true;
+  }
+  return false;
+}
+
+function updateInitials() {
+  const en = g.entry;
+  if (en.saving || g.timer < 30) return;
+  const step = justPressed('left') ? -1 : justPressed('right') ? 1 : 0;
+  if (step) {
+    en.letters[en.pos] = ALPHA[(ALPHA.indexOf(en.letters[en.pos]) + step + 26) % 26];
+    sfx.note(660, 0.03);
+  }
+  if (justPressed('fire') || justPressed('start')) {
+    if (en.pos < 2) {
+      en.pos++;
+      sfx.note(880, 0.04);
+    } else {
+      submitEntry();
+    }
+  }
+}
+
+function submitEntry() {
+  const en = g.entry;
+  en.saving = true;
+  const entry = { initials: en.letters.join(''), score: g.score, wave: g.waveNum + 1 };
+  submitScore(entry)
+    .then((rows) => {
+      g.table = rows;
+      g.tableStatus = 'ok';
+      g.saveError = false;
+      g.hi = Math.max(g.hi, rows[0]?.score || 0);
+    })
+    .catch(() => { g.saveError = true; })
+    .finally(() => {
+      g.highlight = entry;
+      g.state = 'scores';
+      g.timer = 0;
+      sfx.waveClear();
+    });
 }
 
 function update() {
@@ -275,11 +356,23 @@ function update() {
     if (++g.timer >= g.scene.length || (g.timer > 30 && (justPressed('fire') || justPressed('start')))) startWave();
   } else if (g.state === 'title') {
     updateStars();
+    // Attract mode alternates the title page with the high-score table.
+    if (++g.timer % TITLE_CYCLE === TABLE_AT) refreshScores();
     if (justPressed('fire') || justPressed('start')) newGame();
   } else if (g.state === 'over') {
     updateStars();
     updateParts();
-    if (--g.timer <= 0 || (g.timer < 180 && (justPressed('fire') || justPressed('start')))) g.state = 'title';
+    if (--g.timer <= 0 || (g.timer < 180 && (justPressed('fire') || justPressed('start')))) afterGameOver();
+  } else if (g.state === 'initials') {
+    updateStars();
+    g.timer++;
+    updateInitials();
+  } else if (g.state === 'scores') {
+    updateStars();
+    if (++g.timer > 900 || (g.timer > 30 && (justPressed('fire') || justPressed('start')))) {
+      g.highlight = null;
+      toTitle();
+    }
   } else {
     if (justPressed('pause') || (g.paused && justPressed('start'))) g.paused = !g.paused;
     if (!g.paused) {
@@ -312,7 +405,7 @@ function drawStars() {
 function drawHud() {
   text(ctx, 'SCORE ' + pad(g.score), 2, 1, 'W');
   centerText(ctx, 'HI ' + pad(g.hi), 1, 'O');
-  if (g.state !== 'title') text(ctx, 'WAVE ' + pad(g.waveNum + 1, 2), W - 32, 1, 'B');
+  if (!['title', 'scores', 'initials'].includes(g.state)) text(ctx, 'WAVE ' + pad(g.waveNum + 1, 2), W - 32, 1, 'B');
 }
 
 function drawGround() {
@@ -395,13 +488,56 @@ function drawTitle() {
   ctx.drawImage(SPR.ship[0], 136, PLAYER_Y);
 }
 
+const TITLE_CYCLE = 1200;
+const TABLE_AT = 720;
+
+function drawTable() {
+  centerText(ctx, 'HIGH SCORES', 20, 'G', 2);
+  if (!g.table.length) {
+    const msg = g.tableStatus === 'loading' ? 'LOADING...' : g.tableStatus === 'offline' ? 'SCORES OFFLINE' : 'NO SCORES YET';
+    centerText(ctx, msg, 80, 'W', 2);
+  }
+  let marked = false;
+  g.table.forEach((r, i) => {
+    const mine = !marked && g.highlight && r.initials === g.highlight.initials && r.score === g.highlight.score;
+    if (mine) marked = true;
+    const row = String(i + 1).padStart(2, ' ') + '. ' + r.initials + '  ' + pad(r.score) + '  W' + pad(r.wave, 2);
+    const color = mine ? ((g.t >> 3) & 1 ? 'G' : 'V') : i === 0 ? 'O' : 'W';
+    centerText(ctx, row, 40 + i * 12, color, 2);
+  });
+  let footer = isShared ? 'GALACTIC TOP 10' : 'THIS DEVICE ONLY';
+  if (g.tableStatus === 'offline') footer = 'SCORES OFFLINE';
+  if (g.saveError && g.state === 'scores') footer = 'COULD NOT SAVE SCORE';
+  centerText(ctx, footer, 166, 'B');
+}
+
+function drawInitials() {
+  const en = g.entry;
+  centerText(ctx, 'NEW HIGH SCORE!', 28, 'O', 2);
+  centerText(ctx, pad(g.score), 48, 'W', 2);
+  centerText(ctx, 'ENTER YOUR INITIALS', 72, 'B');
+  const x0 = Math.floor((W - 44) / 2);
+  en.letters.forEach((ch, i) => text(ctx, ch, x0 + i * 16, 88, i === en.pos ? 'G' : 'W', 4));
+  if (!en.saving && (g.t >> 4) & 1) {
+    ctx.fillStyle = PAL.G;
+    ctx.fillRect(x0 + en.pos * 16, 110, 12, 2);
+  }
+  if (en.saving) centerText(ctx, 'SAVING...', 128, 'W', 2);
+  else {
+    centerText(ctx, 'TYPE OR USE LEFT RIGHT', 128, 'B');
+    centerText(ctx, 'FIRE OR ENTER TO SET', 138, 'B');
+  }
+}
+
 function render() {
   ctx.fillStyle = PAL.K;
   ctx.fillRect(0, 0, W, H);
   drawStars();
   drawHud();
-  if (g.state === 'title') {
-    drawTitle();
+  if (g.state === 'title' || g.state === 'scores' || g.state === 'initials') {
+    if (g.state === 'initials') drawInitials();
+    else if (g.state === 'scores' || g.timer % TITLE_CYCLE >= TABLE_AT) drawTable();
+    else drawTitle();
     ctx.fillStyle = PAL.G;
     ctx.fillRect(0, GROUND, W, 1);
     return;
@@ -430,6 +566,7 @@ function fit() {
 }
 addEventListener('resize', fit);
 fit();
+refreshScores();
 
 const STEP = 1000 / 60;
 let last = performance.now();

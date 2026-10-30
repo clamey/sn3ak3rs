@@ -34,7 +34,23 @@ Touch devices get on-screen ◀ FIRE ▶ buttons.
 
 After wave 8 you get a short comic intermission (three rotate: *Bug Boogie*, *Hopper's Bad Day*,
 *Infiltration*; Space skips), then the cycle repeats 25% faster. You get an extra ship every 10,000 points.
-The high score is saved in `localStorage`.
+A top-10 score qualifies you to enter three initials (type them, or use ◀ ▶ and FIRE on touch).
+The table shows after you enter, and the title screen cycles to it.
+
+## Shared high scores (Supabase)
+
+Scores are shared across players through a Supabase table. If `src/config.js` is blank, they're
+kept in each browser's `localStorage` instead.
+
+1. Create a Supabase project. In the dashboard, open **SQL Editor**, paste in
+   `supabase/schema.sql` and run it.
+2. From **Project Settings → API**, copy the project URL and the `anon` / publishable key into
+   `src/config.js`.
+
+The key is public by design. The row-level security rules in the schema let anyone read scores
+and add one, and nobody edit or delete them. Entries must be three letters A-Z with a plausible
+score, and bursts of submissions are throttled. A browser game can't prove a score is real, so
+this keeps out junk, not a determined cheater.
 
 ## Run locally
 
@@ -57,6 +73,9 @@ index.html        canvas + touch controls
 src/main.js       game loop (fixed 60Hz step), state machine, input, rendering
 src/waves.js      one entry per wave: spawn() + update() (kill-count or timed)
 src/cutscenes.js  timeline-scripted intermissions shown between loops
+src/scores.js     high-score table: Supabase REST or localStorage fallback
+src/config.js     Supabase URL + public key (blank = local only)
+supabase/         database schema and security rules
 src/gfx.js        palette, string-art sprites, 3x5 bitmap font
 src/audio.js      Web Audio square-wave / 1-bit noise sound effects
 src/style.css     scaling, bezel, CRT overlay
