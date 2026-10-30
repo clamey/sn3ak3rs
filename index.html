@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Space Bugs</title>
+  <meta name="description" content="An original Apple II-style fixed-screen shooter. Six waves of space bugs.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'%3E%3Cpath fill='%23ff6a3c' d='M0 0h1v1H0zM6 0h1v1H6zM1 1h1v1H1zM5 1h1v1H5zM2 2h3v1H2zM1 3h5v1H1zM0 4h7v1H0zM1 5h5v1H1zM0 6h1v1H0zM3 6h1v1H3zM6 6h1v1H6z'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+  <main>
+    <div id="crt" class="crt">
+      <canvas id="screen" width="280" height="192" aria-label="Space Bugs game screen"></canvas>
+    </div>
+    <div id="touch" aria-hidden="true">
+      <button data-key="left">&#9664;</button>
+      <button data-key="fire" class="fire">FIRE</button>
+      <button data-key="right">&#9654;</button>
+    </div>
+  </main>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
