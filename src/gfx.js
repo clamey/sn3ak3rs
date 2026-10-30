@@ -206,16 +206,16 @@ for (const [name, rows] of Object.entries(ROCKS)) {
 export const SPR = {};
 for (const [name, frames] of Object.entries(RAW)) SPR[name] = frames.map(makeSprite);
 
-// 3x5 bitmap font, rows separated by spaces.
+// 5-row bitmap font, rows separated by spaces.
 const GLYPHS = {
   A: '.#. #.# ### #.# #.#', B: '##. #.# ##. #.# ##.', C: '.## #.. #.. #.. .##',
   D: '##. #.# #.# #.# ##.', E: '### #.. ##. #.. ###', F: '### #.. ##. #.. #..',
   G: '.## #.. #.# #.# .##', H: '#.# #.# ### #.# #.#', I: '### .#. .#. .#. ###',
   J: '..# ..# ..# #.# .#.', K: '#.# #.# ##. #.# #.#', L: '#.. #.. #.. #.. ###',
-  M: '#.# ### ### #.# #.#', N: '##. #.# #.# #.# #.#', O: '.#. #.# #.# #.# .#.',
+  M: '#...# ##.## #.#.# #...# #...#', N: '##. #.# #.# #.# #.#', O: '.#. #.# #.# #.# .#.',
   P: '##. #.# ##. #.. #..', Q: '.#. #.# #.# ##. .##', R: '##. #.# ##. #.# #.#',
   S: '.## #.. .#. ..# ##.', T: '### .#. .#. .#. .#.', U: '#.# #.# #.# #.# ###',
-  V: '#.# #.# #.# #.# .#.', W: '#.# #.# ### ### #.#', X: '#.# #.# .#. #.# #.#',
+  V: '#.# #.# #.# #.# .#.', W: '#...# #...# #.#.# #.#.# .#.#.', X: '#.# #.# .#. #.# #.#',
   Y: '#.# #.# .#. .#. .#.', Z: '### ..# .#. #.. ###',
   0: '### #.# #.# #.# ###', 1: '.#. ##. .#. .#. ###', 2: '##. ..# .#. #.. ###',
   3: '##. ..# .#. ..# ##.', 4: '#.# #.# ### ..# ..#', 5: '### #.. ##. ..# ##.',
@@ -225,21 +225,28 @@ const GLYPHS = {
   ':': '... .#. ... .#. ...', '(': '.#. #.. #.. #.. .#.', ')': '.#. ..# ..# ..# .#.',
   ' ': '... ... ... ... ...',
 };
+// Glyphs are 3 wide except where that can't be read (W, M), which get 5.
 const FONT = {};
-for (const [ch, g] of Object.entries(GLYPHS)) FONT[ch] = g.replaceAll(' ', '');
+for (const [ch, g] of Object.entries(GLYPHS)) FONT[ch] = g.split(' ');
+
+const glyph = (ch) => FONT[ch] || FONT[' '];
 
 export function textWidth(str, scale = 1) {
-  return str.length * 4 * scale - scale;
+  let w = 0;
+  for (const ch of str.toUpperCase()) w += (glyph(ch)[0].length + 1) * scale;
+  return w - scale;
 }
 
 export function text(ctx, str, x, y, color = 'W', scale = 1) {
   ctx.fillStyle = PAL[color];
   for (const ch of str.toUpperCase()) {
-    const g = FONT[ch] || FONT[' '];
-    for (let i = 0; i < 15; i++) {
-      if (g[i] === '#') ctx.fillRect(x + (i % 3) * scale, y + Math.floor(i / 3) * scale, scale, scale);
-    }
-    x += 4 * scale;
+    const rows = glyph(ch);
+    rows.forEach((row, ry) => {
+      for (let rx = 0; rx < row.length; rx++) {
+        if (row[rx] === '#') ctx.fillRect(x + rx * scale, y + ry * scale, scale, scale);
+      }
+    });
+    x += (rows[0].length + 1) * scale;
   }
 }
 

@@ -1,4 +1,4 @@
-import { W, H, PAL, SPR, text, centerText } from './gfx.js';
+import { W, H, PAL, SPR, text, textWidth, centerText } from './gfx.js';
 import { sfx, unlock, toggleMute } from './audio.js';
 import { WAVES, TOP, GROUND } from './waves.js';
 import { CUTSCENES, drawCutsceneFrame } from './cutscenes.js';
@@ -485,6 +485,8 @@ function drawTitle() {
   if ((g.t >> 5) & 1) centerText(ctx, 'PRESS SPACE TO PLAY', 142, 'W');
   centerText(ctx, 'ARROWS MOVE   SPACE FIRES', 156, 'B');
   centerText(ctx, 'P PAUSE   M MUTE   C CRT', 166, 'B');
+  const secs = Math.ceil((TABLE_AT - (g.timer % TITLE_CYCLE)) / 60);
+  text(ctx, 'TOP 10 SCORES IN ' + secs + 'S', 4, 186, 'V');
   ctx.drawImage(SPR.ship[0], 136, PLAYER_Y);
 }
 
@@ -501,9 +503,14 @@ function drawTable() {
   g.table.forEach((r, i) => {
     const mine = !marked && g.highlight && r.initials === g.highlight.initials && r.score === g.highlight.score;
     if (mine) marked = true;
-    const row = String(i + 1).padStart(2, ' ') + '. ' + r.initials + '  ' + pad(r.score) + '  W' + pad(r.wave, 2);
     const color = mine ? ((g.t >> 3) & 1 ? 'G' : 'V') : i === 0 ? 'O' : 'W';
-    centerText(ctx, row, 40 + i * 12, color, 2);
+    const y = 40 + i * 12;
+    // Fixed columns, since W and M are wider than other letters.
+    const rank = i + 1 + '.';
+    text(ctx, rank, 81 - textWidth(rank, 2), y, color, 2);
+    text(ctx, r.initials, 91, y, color, 2);
+    text(ctx, pad(r.score), 137, y, color, 2);
+    text(ctx, 'W' + pad(r.wave, 2), 197, y, color, 2);
   });
   let footer = isShared ? 'GALACTIC TOP 10' : 'THIS DEVICE ONLY';
   if (g.tableStatus === 'offline') footer = 'SCORES OFFLINE';
@@ -516,11 +523,14 @@ function drawInitials() {
   centerText(ctx, 'NEW HIGH SCORE!', 28, 'O', 2);
   centerText(ctx, pad(g.score), 48, 'W', 2);
   centerText(ctx, 'ENTER YOUR INITIALS', 72, 'B');
-  const x0 = Math.floor((W - 44) / 2);
-  en.letters.forEach((ch, i) => text(ctx, ch, x0 + i * 16, 88, i === en.pos ? 'G' : 'W', 4));
+  // Slots are wide enough for W and M; narrower letters are centered in theirs.
+  const x0 = Math.floor((W - 68) / 2);
+  en.letters.forEach((ch, i) => {
+    text(ctx, ch, x0 + i * 24 + (20 - textWidth(ch, 4)) / 2, 88, i === en.pos ? 'G' : 'W', 4);
+  });
   if (!en.saving && (g.t >> 4) & 1) {
     ctx.fillStyle = PAL.G;
-    ctx.fillRect(x0 + en.pos * 16, 110, 12, 2);
+    ctx.fillRect(x0 + en.pos * 24, 110, 20, 2);
   }
   if (en.saving) centerText(ctx, 'SAVING...', 128, 'W', 2);
   else {
