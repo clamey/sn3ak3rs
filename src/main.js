@@ -369,7 +369,7 @@ function update() {
     updateInitials();
   } else if (g.state === 'scores') {
     updateStars();
-    if (++g.timer > 900 || (g.timer > 30 && (justPressed('fire') || justPressed('start')))) {
+    if (++g.timer > SCORES_HOLD || (g.timer > 30 && (justPressed('fire') || justPressed('start')))) {
       g.highlight = null;
       toTitle();
     }
@@ -491,6 +491,7 @@ function drawTitle() {
 }
 
 const TITLE_CYCLE = 1200;
+const SCORES_HOLD = 900;
 const TABLE_AT = 720;
 
 function drawTable() {
@@ -516,6 +517,8 @@ function drawTable() {
   if (g.tableStatus === 'offline') footer = 'SCORES OFFLINE';
   if (g.saveError && g.state === 'scores') footer = 'COULD NOT SAVE SCORE';
   centerText(ctx, footer, 166, 'B');
+  const left = g.state === 'scores' ? SCORES_HOLD - g.timer : TITLE_CYCLE - (g.timer % TITLE_CYCLE);
+  text(ctx, 'INSTRUCTIONS IN ' + Math.max(1, Math.ceil(left / 60)) + 'S', 4, 186, 'V');
 }
 
 function drawInitials() {
