@@ -1,6 +1,6 @@
 import { W, H, PAL, SPR, text, textWidth, centerText } from './gfx.js';
 import { sfx, unlock, toggleMute } from './audio.js';
-import { WAVES, TOP, GROUND } from './waves.js';
+import { WAVES, TOP, GROUND, beamHalfWidth } from './waves.js';
 import { CUTSCENES, drawCutsceneFrame } from './cutscenes.js';
 import { fetchScores, submitScore, qualifies, isShared } from './scores.js';
 
@@ -56,6 +56,8 @@ const justPressed = (k) => pressed.has(k);
 
 const PLAYER_Y = GROUND - 7;
 const EXTRA_LIFE_EVERY = 10000;
+const TWIN_GAP = 10;
+const RESCUE_BONUS = 1000;
 
 const stars = Array.from({ length: 40 }, () => ({
   x: Math.random() * W, y: TOP + Math.random() * (GROUND - TOP),
@@ -66,21 +68,37 @@ const g = {
   state: 'title', timer: 0, paused: false, t: 0,
   score: 0, hi: 0, lives: 3, nextLife: EXTRA_LIFE_EVERY,
   waveNum: 0, def: null, spd: 1, spawned: 0, killed: 0, spawnTimer: 0, elapsed: 0, bonusShown: 0,
-  bugs: [], bullets: [], spits: [], parts: [],
+  bugs: [], bullets: [], spits: [], parts: [], rescue: null, popup: null,
   table: [], tableStatus: 'loading', entry: null, highlight: null, saveError: false,
-  player: { x: 136, y: PLAYER_Y, alive: true, dead: 0, inv: 0, cool: 0 },
+  player: { x: 136, y: PLAYER_Y, alive: true, dead: 0, inv: 0, cool: 0, twin: false },
   sfx,
   spit(x, y, vx, vy) {
     if (g.spits.length < 10 && g.player.alive) { g.spits.push({ x, y, vx, vy }); sfx.spit(); }
   },
   burst: (...args) => explode(...args),
   hurt() {
-    if (g.player.alive && g.player.inv === 0) killPlayer();
+    if (!g.player.alive || g.player.inv > 0) return;
+    if (g.player.twin) loseShip(1);
+    else killPlayer();
+  },
+  // A grabber's tractor beam takes the ship. That costs a life like any death, but the ship
+  // can be won back. Returns false if the ship can't be taken right now.
+  capture(b) {
+    const p = g.player;
+    if (!p.alive || p.inv > 0 || p.twin) return false;
+    b.captive = { x: p.x, y: p.y, w: 9, h: 7 };
+    p.alive = false;
+    p.dead = 240;
+    g.lives--;
+    g.spits = [];
+    sfx.captured();
+    return true;
   },
 };
 
 function newGame() {
   Object.assign(g, { score: 0, lives: 3, nextLife: EXTRA_LIFE_EVERY, waveNum: 0 });
+  g.player.twin = false;
   resetPlayer();
   startWave();
 }
@@ -92,7 +110,7 @@ function resetPlayer() {
 function startWave() {
   g.def = WAVES[g.waveNum % WAVES.length];
   g.spd = 1 + 0.25 * Math.floor(g.waveNum / WAVES.length);
-  Object.assign(g, { spawned: 0, killed: 0, elapsed: 0, bonusShown: 0, spawnTimer: 30, bugs: [], bullets: [], spits: [] });
+  Object.assign(g, { spawned: 0, killed: 0, elapsed: 0, bonusShown: 0, spawnTimer: 30, bugs: [], bullets: [], spits: [], rescue: null, popup: null });
   g.state = 'intro';
   g.timer = 120;
   sfx.waveStart();
@@ -135,10 +153,21 @@ function killPlayer() {
   const p = g.player;
   p.alive = false;
   p.dead = 120;
+  p.twin = false;
   g.lives--;
   g.spits = [];
   explode(p.x + 4, p.y + 3, 'G', 30, 2.2);
   explode(p.x + 4, p.y + 3, 'W', 15, 1.4);
+  sfx.die();
+}
+
+// With twin ships, a hit only costs the ship that was hit (0 = left, 1 = right).
+function loseShip(which) {
+  const p = g.player;
+  explode(p.x + which * TWIN_GAP + 4, p.y + 3, 'G', 20, 2);
+  if (which === 0) p.x += TWIN_GAP;
+  p.twin = false;
+  p.inv = 60;
   sfx.die();
 }
 
@@ -175,11 +204,12 @@ function updatePlayer() {
   }
   if (held.has('left')) p.x -= 1.7;
   if (held.has('right')) p.x += 1.7;
-  p.x = Math.max(0, Math.min(W - 9, p.x));
+  p.x = Math.max(0, Math.min(W - 9 - (p.twin ? TWIN_GAP : 0), p.x));
   if (p.inv > 0) p.inv--;
   if (p.cool > 0) p.cool--;
-  if (held.has('fire') && p.cool === 0 && g.bullets.length < 2) {
+  if (held.has('fire') && p.cool === 0 && g.bullets.length <= (p.twin ? 2 : 1)) {
     g.bullets.push({ x: Math.round(p.x) + 4, y: p.y - 4, w: 1, h: 4 });
+    if (p.twin) g.bullets.push({ x: Math.round(p.x) + 4 + TWIN_GAP, y: p.y - 4, w: 1, h: 4 });
     p.cool = 10;
     sfx.shoot();
     if (g.state === 'play' && g.def.onShot) g.def.onShot(g);
@@ -211,6 +241,14 @@ function updatePlay() {
 
   for (const s of g.bullets) {
     for (const b of g.bugs) {
+      if (b.captive && overlap(s, b.captive)) {
+        // Shot your own captured ship: it's gone for good.
+        s.dead = true;
+        explode(b.captive.x + 4, b.captive.y + 3, 'O', 20, 1.8);
+        b.captive = null;
+        sfx.die();
+        break;
+      }
       if (b.dead || b.gone || !b.hittable || !overlap(s, b)) continue;
       s.dead = true;
       b.hp = (b.hp ?? 1) - 1;
@@ -226,23 +264,35 @@ function updatePlay() {
       explode(b.x + b.w / 2, b.y + b.h / 2, def.color, 8 + b.w);
       explode(b.x + b.w / 2, b.y + b.h / 2, 'W', 5, 1);
       sfx[def.killSound || 'hit']();
+      if (b.captive) {
+        g.rescue = { x: b.captive.x, y: b.captive.y };
+        addScore(RESCUE_BONUS);
+        g.popup = { text: 'RESCUED ' + RESCUE_BONUS, x: b.captive.x + 4, y: b.captive.y - 8, t: 90 };
+        sfx.rescue();
+      }
       break;
     }
   }
 
-  if (p.alive && p.inv === 0) {
-    const hb = { x: p.x + 1, y: p.y + 1, w: 7, h: 6 };
+  for (let i = 0; i < (p.twin ? 2 : 1); i++) {
+    if (!p.alive || p.inv > 0) break;
+    const hb = { x: p.x + i * TWIN_GAP + 1, y: p.y + 1, w: 7, h: 6 };
     const hitBySpit = g.spits.some((s) => overlap({ x: s.x, y: s.y, w: 1, h: 3 }, hb));
     const hitByBug = g.bugs.some((b) => !b.dead && !b.gone && b.hittable && overlap(b, hb));
-    if (hitBySpit || hitByBug) killPlayer();
+    if (!hitBySpit && !hitByBug) continue;
+    if (p.twin) loseShip(i);
+    else killPlayer();
   }
+
+  updateRescue();
+  if (g.popup && --g.popup.t <= 0) g.popup = null;
 
   g.bullets = g.bullets.filter((s) => !s.dead && s.y > TOP - 4);
   g.spits = g.spits.filter((s) => s.y < GROUND && s.x > -2 && s.x < W + 2);
   g.bugs = g.bugs.filter((b) => !b.dead && !b.gone);
 
   const done = def.duration ? g.elapsed >= def.duration && g.bugs.length === 0 : g.killed >= def.total;
-  if (g.state === 'play' && done && p.alive) {
+  if (g.state === 'play' && done && p.alive && !g.rescue) {
     g.state = 'clear';
     g.timer = 120;
     g.spits = [];
@@ -251,6 +301,24 @@ function updatePlay() {
       g.bonusShown = def.bonus;
     }
     sfx.waveClear();
+  }
+}
+
+// A rescued ship drifts down and docks to the right of the player's ship, waiting overhead
+// if the player is between lives.
+function updateRescue() {
+  const r = g.rescue;
+  if (!r) return;
+  const p = g.player;
+  const tx = p.alive ? Math.min(p.x + TWIN_GAP, W - 9) : r.x;
+  const ty = p.alive ? p.y : PLAYER_Y - 24;
+  r.x += Math.max(-1.5, Math.min(1.5, tx - r.x));
+  r.y += Math.max(-1, Math.min(1, ty - r.y));
+  if (p.alive && Math.abs(tx - r.x) < 1 && Math.abs(ty - r.y) < 1) {
+    p.twin = true;
+    p.x = Math.min(p.x, W - 9 - TWIN_GAP);
+    g.rescue = null;
+    sfx.extraLife();
   }
 }
 
@@ -430,9 +498,23 @@ function drawBug(b, def) {
     const cx = Math.round(b.x + b.w / 2);
     for (let y = TOP; y < b.y; y += 2) ctx.fillRect(cx, y, 1, 1);
   }
+  if (b.beam) drawBeam(b);
+  if (b.captive) ctx.drawImage(SPR.shipCaptive[0], Math.round(b.captive.x), Math.round(b.captive.y));
   const name = b.spr || def.sprite;
   const frames = (b.flash && SPR[name + 'Hit']) || SPR[name];
   ctx.drawImage(frames[b.frame % frames.length], Math.round(b.x), Math.round(b.y));
+}
+
+// Tractor beam: flickering dotted rungs that widen toward the ground.
+function drawBeam(b) {
+  const cx = Math.round(b.x + b.w / 2);
+  const top = Math.round(b.y + b.h);
+  for (let y = top; y < GROUND; y += 2) {
+    const half = Math.round(beamHalfWidth(b, y));
+    if (!half) break;
+    ctx.fillStyle = PAL[((y - top + (g.t >> 2)) >> 1) & 1 ? 'B' : 'W'];
+    for (let x = cx - half + ((y >> 1) + (g.t >> 3)) % 2; x <= cx + half; x += 2) ctx.fillRect(x, y, 1, 1);
+  }
 }
 
 function drawPlay() {
@@ -452,7 +534,15 @@ function drawPlay() {
   }
 
   const p = g.player;
-  if (p.alive && !(p.inv > 0 && (p.inv >> 2) & 1)) ctx.drawImage(SPR.ship[0], Math.round(p.x), p.y);
+  if (p.alive && !(p.inv > 0 && (p.inv >> 2) & 1)) {
+    ctx.drawImage(SPR.ship[0], Math.round(p.x), p.y);
+    if (p.twin) ctx.drawImage(SPR.ship[0], Math.round(p.x) + TWIN_GAP, p.y);
+  }
+  if (g.rescue && (g.t >> 2) & 1) ctx.drawImage(SPR.ship[0], Math.round(g.rescue.x), Math.round(g.rescue.y));
+  if (g.popup) {
+    const w = textWidth(g.popup.text);
+    text(ctx, g.popup.text, Math.max(0, Math.min(W - w, g.popup.x - w / 2)), Math.round(g.popup.y), 'O');
+  }
 
   for (const q of g.parts) {
     ctx.fillStyle = PAL[q.c];

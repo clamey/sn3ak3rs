@@ -32,6 +32,11 @@ Touch devices get on-screen ◀ FIRE ▶ buttons.
 | 7 | Divers | Patrol the top, then dive and steer toward you | 125 |
 | 8 | Hoppers | Leap along the ground in arcs. Shoot them mid-air | 200 |
 
+**Easter egg:** one Bouncer in each Bouncers wave is a grabber. At the bottom of a bounce it can
+lower a tractor beam. Get caught and your ship is towed away (that costs a life), but shoot the
+grabber without hitting the towed ship and it comes back to fly beside you: twin ships, double
+shots, and a 1000-point rescue bonus. A hit on a twin costs only that ship.
+
 After wave 8 you get a short comic intermission (three rotate: *Bug Boogie*, *Hopper's Bad Day*,
 *Infiltration*; Space skips), then the cycle repeats 25% faster. You get an extra ship every 10,000 points.
 A top-10 score qualifies you to enter three initials (type them, or use ◀ ▶ and FIRE on touch).

@@ -202,6 +202,8 @@ for (const [name, rows] of Object.entries(ROCKS)) {
   RAW[name] = [rows, rotate180(rows)];
   RAW[name + 'Hit'] = RAW[name].map(whiteOut);
 }
+// A ship held by a grabber Bouncer turns orange to match it.
+RAW.shipCaptive = RAW.ship.map((rows) => rows.map((r) => r.replace(/G/g, 'O')));
 
 export const SPR = {};
 for (const [name, frames] of Object.entries(RAW)) SPR[name] = frames.map(makeSprite);

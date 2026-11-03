@@ -23,6 +23,32 @@ function aimAt(g, b, speed) {
   g.spit(b.x + b.w / 2, b.y + b.h, (dx / d) * speed, (dy / d) * speed);
 }
 
+const BEAM_GROW = 30;
+const BEAM_HOLD = 120;
+
+// The beam widens as it goes down. Returns its half-width at height y, or 0 above/below it.
+export function beamHalfWidth(b, y) {
+  const top = b.y + b.h;
+  if (y < top || y > top + b.beam * (GROUND - top)) return 0;
+  return 3 + (y - top) * 0.35;
+}
+
+function updateBeam(b, g) {
+  if (b.st % 10 === 1) g.sfx.tractor();
+  b.beam = Math.min(1, b.st / BEAM_GROW);
+  const p = g.player;
+  const cx = b.x + b.w / 2;
+  if (b.beam === 1 && Math.abs(p.x + 4 - cx) <= beamHalfWidth(b, p.y + 3) && g.capture(b)) {
+    b.state = 'reel';
+    return;
+  }
+  if (b.st > BEAM_GROW + BEAM_HOLD) {
+    b.state = 'bounce';
+    b.st = 0;
+    b.beam = 0;
+  }
+}
+
 export const WAVES = [
   {
     name: 'DRIFTERS', sprite: 'drifter', color: 'V', points: 50, total: 14, maxAlive: 6,
@@ -45,17 +71,57 @@ export const WAVES = [
     },
   },
   {
+    // Easter egg: one bouncer per wave is a grabber, indistinguishable from the rest. At the
+    // bottom of a bounce it may stop and lower a tractor beam. A ship caught in it is hauled up
+    // and towed behind the grabber; shoot the grabber but not the ship to get it back as a twin.
     name: 'BOUNCERS', sprite: 'bouncer', color: 'O', points: 75, total: 14, maxAlive: 6,
     spawn(g) {
-      return { x: rand(10, W - 20), y: TOP, vx: sign() * rand(0.7, 1.2) * g.spd, vy: rand(0.5, 0.9) * g.spd };
+      return {
+        x: rand(10, W - 20), y: TOP, vx: sign() * rand(0.7, 1.2) * g.spd, vy: rand(0.5, 0.9) * g.spd,
+        grabber: g.spawned === 2, state: 'bounce', st: 0, beam: 0, trail: [],
+      };
     },
     update(b, g) {
-      b.x += b.vx;
-      b.y += b.vy;
-      if ((b.x < 0 && b.vx < 0) || (b.x > W - b.w && b.vx > 0)) b.vx = -b.vx;
-      if ((b.y < TOP && b.vy < 0) || (b.y > 150 && b.vy > 0)) b.vy = -b.vy;
+      b.st++;
       b.frame = (b.t >> 2) & 1;
-      if (Math.random() < 0.003 * g.spd) g.spit(b.x + 3, b.y + 7, 0, 1.4 * g.spd);
+      if (b.state === 'beam') {
+        updateBeam(b, g);
+      } else if (b.state === 'reel') {
+        // Haul the captured ship up to the grabber, then start towing it.
+        const c = b.captive;
+        c.x += Math.sign(b.x - 1 - c.x) * Math.min(0.6, Math.abs(b.x - 1 - c.x));
+        c.y -= 0.8;
+        b.beam = Math.max(0.15, b.beam);
+        if (c.y <= b.y + b.h + 2) {
+          b.state = 'bounce';
+          b.beam = 0;
+          // Seed the towing path so the ship eases into line behind the grabber.
+          b.trail = Array.from({ length: 16 }, (_, i) => ({
+            x: c.x + 1 + ((b.x - c.x - 1) * i) / 16, y: c.y + ((b.y - c.y) * i) / 16,
+          }));
+        }
+      } else {
+        b.x += b.vx;
+        b.y += b.vy;
+        if ((b.x < 0 && b.vx < 0) || (b.x > W - b.w && b.vx > 0)) b.vx = -b.vx;
+        if (b.y < TOP && b.vy < 0) b.vy = -b.vy;
+        if (b.y > 150 && b.vy > 0) {
+          b.vy = -b.vy;
+          const p = g.player;
+          if (b.grabber && !b.captive && b.st > 120 && p.alive && !p.twin && Math.random() < 0.6) {
+            b.state = 'beam';
+            b.st = 0;
+          }
+        }
+        if (b.captive) {
+          // The towed ship follows the grabber's path a few moments behind it.
+          b.trail.push({ x: b.x, y: b.y });
+          if (b.trail.length > 16) b.trail.shift();
+          b.captive.x = b.trail[0].x - 1;
+          b.captive.y = b.trail[0].y;
+        }
+        if (Math.random() < 0.003 * g.spd) g.spit(b.x + 3, b.y + 7, 0, 1.4 * g.spd);
+      }
     },
   },
   {
